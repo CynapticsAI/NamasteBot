@@ -94,12 +94,8 @@ output.register_callback('notebook.saveAudio', save_audio)
 
 # Display the recorder interface
 display(HTML(js_code))
-
-
 query=whisper.load_model("medium").transcribe("my_recording.wav",language="en")['text']
 print(query)
-
-
 retriever = vectorstore.as_retriever(search_kwargs={"k": 2})
 qa_chain = RetrievalQA.from_chain_type(llm, retriever=retriever)
 response = qa_chain.invoke({"query": query})

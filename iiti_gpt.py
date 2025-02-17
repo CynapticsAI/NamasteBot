@@ -1,122 +1,105 @@
-!pip install -q --upgrade google-generativeai langchain-google-genai  langchain-community
-!pip install git+https://github.com/openai/whisper.git
-!pip install faiss-cpu
-!pip install edge-tts
-!pip install pydub -q
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
 from langchain_community.document_loaders import TextLoader
 from langchain_community.vectorstores import FAISS
-from langchain_google_genai import GoogleGenerativeAIEmbeddings
-from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.chains import RetrievalQA
-from IPython.display import HTML, Javascript, Audio
-from google.colab import output
-from base64 import b64decode
-from pydub import AudioSegment
-import edge_tts
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+import os
+os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"  
 import whisper
-llm = ChatGoogleGenerativeAI(model="gemini-1.5-pro-latest",credentials=credentials)
-loader = TextLoader("/content/drive/MyDrive/IITI GPT/last data.txt")
+import edge_tts
+import asyncio
+import sounddevice as sd
+import numpy as np
+import scipy
+import pydub
+import io
+from scipy.io.wavfile import write
+from pydub import AudioSegment
+from pydub.playback import play
+os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "tough-dreamer-449219-p2-6a5c6c7ee6a3.json"
+llm = ChatGoogleGenerativeAI(model="gemini-1.5-pro-latest")  
+embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001")  
+loader = TextLoader('C:/Users/switi/OneDrive/Desktop/IITI GPT/data.txt',encoding='utf-8')
 documents = loader.load()
-embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001",credentials=credentials)
-vectorstore = FAISS.from_documents(documents, embeddings)
-# Define JavaScript/HTML interface
-js_code = """
-<div id="recorder">
-  <button onclick="startRecording()" id="startBtn">🎤 Start Recording</button>
-  <button onclick="stopRecording()" id="stopBtn" disabled>⏹️ Stop & Save</button>
-</div>
+text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
+texts = text_splitter.split_documents(documents)
+vectorstore = FAISS.from_documents(texts,embeddings)
 
-<script>
-let mediaRecorder;
-let audioChunks = [];
-
-async function startRecording() {
-  document.getElementById("stopBtn").disabled = false;
-  document.getElementById("startBtn").disabled = true;
-
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    mediaRecorder = new MediaRecorder(stream);
-
-    mediaRecorder.ondataavailable = (event) => {
-      audioChunks.push(event.data);
-    };
-
-    mediaRecorder.start();
-  } catch (error) {
-    alert('Error accessing microphone: ' + error.message);
-  }
-}
-
-async function stopRecording() {
-  document.getElementById("startBtn").disabled = false;
-  document.getElementById("stopBtn").disabled = true;
-
-  mediaRecorder.stop();
-  mediaRecorder.onstop = async () => {
-    const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
-    const reader = new FileReader();
-
-    reader.readAsDataURL(audioBlob);
-    reader.onloadend = () => {
-      const base64data = reader.result;
-      google.colab.kernel.invokeFunction('notebook.saveAudio', [base64data], {});
-    };
-
-    audioChunks = [];
-  };
-}
-</script>
-"""
-def save_audio(base64_data):
+def record_audio(filename='recording.wav', samplerate=16000):
+    """Record audio until user stops it"""
+    print("\nPress Enter to start recording...")
+    input()
+    
+    audio_data = []
+    stream = sd.InputStream(
+        samplerate=samplerate,
+        channels=1,
+        dtype='int16',
+        callback=lambda indata, frames, time, status: audio_data.append(indata.copy())
+    )
+    
     try:
-        # Decode base64 audio data
-        audio_bytes = b64decode(base64_data.split(',')[1])
+        print("Recording... Press Enter to stop")
+        stream.start()
+        input()  
+    finally:
+        stream.stop()
+        stream.close()
+        print("⏹️ Recording stopped")
+        
+        if audio_data:
+            audio_array = np.concatenate(audio_data)
+            write(filename, samplerate, audio_array)
+            print(f"✅ Saved to {filename}")
+            return filename
+        return None
 
-        # Save original webm file
-        with open('my_recording.webm', 'wb') as f:
-            f.write(audio_bytes)
-
-        # Convert to WAV format
-        audio = AudioSegment.from_file('my_recording.webm', format='webm')
-        audio.export('my_recording.wav', format='wav')
-
-        # Show audio player
-        display(Audio('my_recording.wav'))
-        print("✅ Audio saved as my_recording.wav")
-
-    except Exception as e:
-        print("Error processing audio:", e)
-
-# Register callback
-output.register_callback('notebook.saveAudio', save_audio)
-
-# Display the recorder interface
-display(HTML(js_code))
-query=whisper.load_model("medium").transcribe("my_recording.wav",language="en")['text']
-print(query)
-retriever = vectorstore.as_retriever(search_kwargs={"k": 2})
-qa_chain = RetrievalQA.from_chain_type(llm, retriever=retriever)
-response = qa_chain.invoke({"query": query})
-print("\nGenerated Response:\n", response["result"])
-# Your text
-text = response["result"]
-text = text.replace("**", " ")
-text = text.replace("*", " ")
-text = text.replace("_", " ")
-# Customize voice and speech parameters
-VOICE = "en-US-ChristopherNeural"  # Deep male voice
-RATE = "+10%"  # Speed adjustment (-20% to +20% for natural pacing)
-PITCH = "+5Hz"  # Slightly lower pitch for warmth
-
-# Generate speech with adjustments
-async def generate_speech():
+async def generate_speech_async(text, filename="output.mp3"):
+    """TTS Generation"""
+    VOICE = "en-US-ChristopherNeural"
+    RATE = "+10%"
+    PITCH = "+5Hz"
+    
     communicate = edge_tts.Communicate(text, VOICE, rate=RATE, pitch=PITCH)
-    await communicate.save("human_like_audio.mp3")
+    await communicate.save(filename)
+    return filename
 
-# Run in Colab/Jupyter (no asyncio loop needed)
-await generate_speech()
+def process_query(query):
+    """QA Processing"""
+    retriever = vectorstore.as_retriever(search_kwargs={"k": 8})
+    qa_chain = RetrievalQA.from_chain_type(llm, retriever=retriever)
+    response = qa_chain.invoke({"query": query})
+    return response["result"]
 
-# Auto-play enhanced audio
-Audio("human_like_audio.mp3", autoplay=True)
+def main():
+    audio_file = record_audio()
+    
+    if not audio_file:
+        print("❌ No audio recorded")
+        return
+    
+    # Transcribe audio
+    model = whisper.load_model("small")  # Consider using smaller model if resources are limited
+    result = model.transcribe(audio_file, language="en")
+    query = result["text"]
+    print(f"\n🗣️ Query: {query}")
+    
+    # Process query
+    try:
+        response = process_query(query)
+        print(f"\n🤖 Response: {response}")
+    except Exception as e:
+        print(f"\n❌ Error processing query: {str(e)}")
+        return
+    
+    # Generate and play speech
+    text = response.replace("**", " ").replace("*", " ").replace("_", " ")
+    try:
+        asyncio.run(generate_speech_async(text))
+        audio = AudioSegment.from_file("output.mp3")
+        play(audio)
+    except Exception as e:
+        print(f"🔇 Playback error: {str(e)}")
+
+if __name__ == "__main__":
+    main()

@@ -13,6 +13,9 @@ import numpy as np
 from scipy.io.wavfile import write
 from pydub import AudioSegment
 from pydub.playback import play
+from langchain.chains import ConversationChain
+from langchain.memory import ConversationBufferMemory
+from langchain.schema import ChatMessage
 
 os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "tough-dreamer-449219-p2-6a5c6c7ee6a3.json"
 
@@ -21,6 +24,8 @@ llm = ChatGoogleGenerativeAI(model="gemini-1.5-pro-latest")
 api_key="enter your open api key"   
 
 data_path='C:/Users/switi/OneDrive/Desktop/IITI GPT/data.txt'
+
+chat_history = [] 
 # Loading text from txt file
 def get_txt(data_path):
     loader = TextLoader(data_path,encoding='utf-8')
@@ -74,6 +79,15 @@ async def generate_speech_async(text, filename="output.mp3"):
     communicate = edge_tts.Communicate(text, VOICE, rate=RATE, pitch=PITCH)
     await communicate.save(filename)
     return filename
+
+def store_chat_history(user_message, bot_response):
+    chat_history.append(ChatMessage(role="user", content=user_message))
+    chat_history.append(ChatMessage(role="assistant", content=bot_response))
+
+def reset_chat_history():
+    global chat_history
+    chat_history=[]
+
 # Used the above made functions here
 def process_query(query):
     """QA Processing"""
@@ -88,8 +102,11 @@ def process_query(query):
     retriever = vectorstore.as_retriever(search_kwargs={"k": 8})
     
     qa_chain = RetrievalQA.from_chain_type(llm, retriever=retriever)
+
+    chat_context = " ".join([f"{message['role']}: {message['content']}" for message in chat_history])
+    full_query = chat_context + " user: " + query
     
-    response = qa_chain.invoke({"query": query})
+    response = qa_chain.invoke({"query": full_query})
     
     return response["result"]
 
@@ -105,23 +122,26 @@ def main():
     result = model.transcribe(audio_file, language="en")
     query = result["text"]
     print(f"\n🗣️ Query: {query}")
-    
+
+    if query=="Bye and clear chat.":
+        reset_chat_history()
+        
     # Process query
     try:
         response = process_query(query)
         print(f"\n🤖 Response: {response}")
+        #Store chat history
+        store_chat_history(query, response)
     except Exception as e:
         print(f"\n❌ Error processing query: {str(e)}")
         return
     
     # Generate and play speech
     text = response.replace("**", " ").replace("*", " ").replace("_", " ")
-    try:
-        asyncio.run(generate_speech_async(text))
-        audio = AudioSegment.from_file("output.mp3")
-        play(audio)
-    except Exception as e:
-        print(f"🔇 Playback error: {str(e)}")
+    asyncio.run(generate_speech_async(text))
+    audio = AudioSegment.from_file("output.mp3")
+    play(audio)
 
 if __name__ == "__main__":
     main()
+

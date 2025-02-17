@@ -1,0 +1,10 @@
+langchain
+langchain-community
+langchain-openai
+langchain-community
+google-generativeai 
+langchain-google-genai
+google-auth
+git+https://github.com/openai/whisper.git
+faiss-cpu
+gTTS

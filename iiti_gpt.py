@@ -10,21 +10,32 @@ import edge_tts
 import asyncio
 import sounddevice as sd
 import numpy as np
-import scipy
-import pydub
-import io
 from scipy.io.wavfile import write
 from pydub import AudioSegment
 from pydub.playback import play
-os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "tough-dreamer-449219-p2-6a5c6c7ee6a3.json"
-llm = ChatGoogleGenerativeAI(model="gemini-1.5-pro-latest")  
-embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001")  
-loader = TextLoader('C:/Users/switi/OneDrive/Desktop/IITI GPT/data.txt',encoding='utf-8')
-documents = loader.load()
-text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
-texts = text_splitter.split_documents(documents)
-vectorstore = FAISS.from_documents(texts,embeddings)
 
+os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "tough-dreamer-449219-p2-6a5c6c7ee6a3.json"
+
+llm = ChatGoogleGenerativeAI(model="gemini-1.5-pro-latest")
+
+api_key="enter your open api key"   
+
+data_path='C:/Users/switi/OneDrive/Desktop/IITI GPT/data.txt'
+# Loading text from txt file
+def get_txt(data_path):
+    loader = TextLoader(data_path,encoding='utf-8')
+    documents = loader.load()
+    return documents
+# Splitting that text
+def split_text(documents):
+    text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
+    texts = text_splitter.split_documents(documents)
+    return texts
+# assinging them vectors in vector space
+def vector_store(texts,embeddings):
+    vectorstore = FAISS.from_documents(texts,embeddings)
+    return vectorstore
+# Didn't alter anything here
 def record_audio(filename='recording.wav', samplerate=16000):
     """Record audio until user stops it"""
     print("\nPress Enter to start recording...")
@@ -63,12 +74,23 @@ async def generate_speech_async(text, filename="output.mp3"):
     communicate = edge_tts.Communicate(text, VOICE, rate=RATE, pitch=PITCH)
     await communicate.save(filename)
     return filename
-
+# Used the above made functions here
 def process_query(query):
     """QA Processing"""
+    embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001") 
+
+    documents=get_txt(data_path)
+
+    texts=split_text(documents)
+
+    vectorstore=vector_store(texts,embeddings)
+
     retriever = vectorstore.as_retriever(search_kwargs={"k": 8})
+    
     qa_chain = RetrievalQA.from_chain_type(llm, retriever=retriever)
+    
     response = qa_chain.invoke({"query": query})
+    
     return response["result"]
 
 def main():

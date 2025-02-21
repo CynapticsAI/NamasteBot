@@ -1,10 +1,12 @@
-from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
+import os
+os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE" 
+import openai
+from langchain.chat_models import ChatOpenAI
+from langchain.embeddings.openai import OpenAIEmbeddings
 from langchain_community.document_loaders import TextLoader
 from langchain_community.vectorstores import FAISS
 from langchain.chains import RetrievalQA
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-import os
-os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"  
 import whisper
 import edge_tts
 import asyncio
@@ -12,19 +14,19 @@ import sounddevice as sd
 import numpy as np
 from scipy.io.wavfile import write
 from pydub import AudioSegment
-from pydub.playback import play
+from pydub import AudioSegment
+from io import BytesIO
+import simpleaudio as sa
 from langchain.chains import ConversationChain
 from langchain.memory import ConversationBufferMemory
 from langchain.schema import ChatMessage
 from langchain.prompts import PromptTemplate
 
-os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "tough-dreamer-449219-p2-6a5c6c7ee6a3.json"
+openai.api_key = os.getenv("OPENAI_API_KEY")
 
-llm = ChatGoogleGenerativeAI(model="gemini-1.5-pro-latest")
+llm = ChatOpenAI(model_name="gpt-4-turbo", temperature=0.7)
 
-api_key="enter your open api key"   
-
-data_path='C:/Users/switi/OneDrive/Desktop/IITI GPT/data.txt'
+data_path='your-text-path-here'
 
 chat_history = [] 
 # Loading text from txt file
@@ -70,16 +72,33 @@ def record_audio(filename='recording.wav', samplerate=16000):
             print(f"✅ Saved to {filename}")
             return filename
         return None
-
-async def generate_speech_async(text, filename="output.mp3"):
-    """TTS Generation"""
+async def generate_and_play_speech(text):
+    """TTS Generation and immediate playback"""
     VOICE = "en-US-ChristopherNeural"
     RATE = "+10%"
     PITCH = "+5Hz"
     
     communicate = edge_tts.Communicate(text, VOICE, rate=RATE, pitch=PITCH)
-    await communicate.save(filename)
-    return filename
+    
+    # Stream directly to memory instead of file
+    mp3_data = BytesIO()
+    async for chunk in communicate.stream():
+        if chunk["type"] == "audio":
+            mp3_data.write(chunk["data"])
+    
+    # Reset buffer position
+    mp3_data.seek(0)
+    
+    # Load and play audio directly from memory
+    audio = AudioSegment.from_file(mp3_data, format="mp3")
+    wave_obj = sa.WaveObject(
+        audio.raw_data, 
+        num_channels=audio.channels,
+        bytes_per_sample=audio.sample_width,
+        sample_rate=audio.frame_rate
+    )
+    play_obj = wave_obj.play()
+    play_obj.wait_done()
 
 def store_chat_history(user_message, bot_response):
     chat_history.append(ChatMessage(role="user", content=user_message))
@@ -92,7 +111,7 @@ def reset_chat_history():
 # Used the above made functions here
 def process_query(query):
     """QA Processing"""
-    embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001") 
+    embeddings = OpenAIEmbeddings(model="text-embedding-ada-002")
 
     documents=get_txt(data_path)
 
@@ -166,10 +185,8 @@ def main():
     
     # Generate and play speech
     text = response.replace("**", " ").replace("*", " ").replace("_", " ")
-    asyncio.run(generate_speech_async(text))
-    audio = AudioSegment.from_file("output.mp3")
-    play(audio)
-
+    asyncio.run(generate_and_play_speech(text)) 
+   
 if __name__ == "__main__":
     main()
 

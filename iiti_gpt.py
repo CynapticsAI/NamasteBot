@@ -16,6 +16,7 @@ from pydub.playback import play
 from langchain.chains import ConversationChain
 from langchain.memory import ConversationBufferMemory
 from langchain.schema import ChatMessage
+from langchain.prompts import PromptTemplate
 
 os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "tough-dreamer-449219-p2-6a5c6c7ee6a3.json"
 
@@ -102,7 +103,34 @@ def process_query(query):
     retriever = vectorstore.as_retriever(search_kwargs={"k": 8})
     
     qa_chain = RetrievalQA.from_chain_type(llm, retriever=retriever)
+    
+    prompt_template = """ 
+    1) Answer the question as detailed as possible from the provided context (at least 100 words) including all available information.
+    2) If the exact answer is not found in the documents, expand on relevant topics using your creativity.
+    3) If a question has answer in context and in general focus on answering from context.
+    4) If the answer is not in the context:
+       - Answer without relying on the context.
+       - Start the answer with: "Answering in general as context is not provided:"
+      
+    Context:
+    {context}
+    
+    Question:
+    {question}
+    
+    Answer:
+    """
 
+    prompt = PromptTemplate(
+        template=prompt_template,
+        input_variables=["context", "question"]
+    )
+    qa_chain = RetrievalQA.from_chain_type(
+        llm,
+        retriever=retriever,
+        chain_type_kwargs={"prompt": prompt}  
+    )
+    
     chat_context = " ".join([f"{message['role']}: {message['content']}" for message in chat_history])
     full_query = chat_context + " user: " + query
     
